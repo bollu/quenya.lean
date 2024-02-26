@@ -45,13 +45,13 @@ def withSeek (ix : Nat) (x : ElfWriterM α) : ElfWriterM α := do
 def writeByteArray (b : ByteArray) : ElfWriterM Unit := do
   let ix ← tell
   modify fun s => { s with
-    arr := ByteArray.copySlice (src := s.arr) (srcOff := 0) (dest := b) (destOff := ix) (len := b.size)
+    arr := ByteArray.copySlice (src := b) (srcOff := 0) (dest := s.arr) (destOff := ix) (len := b.size)
     ptr := s.ptr + b.size
   }
 
 def writeUInt8 (x : UInt8) : ElfWriterM Unit := do
   modify fun s => { s with
-    arr := s.arr.set! s.ptr x
+    arr := ByteArray.copySlice (src := ByteArray.mk #[x]) (srcOff := 0) (dest := s.arr) (destOff := s.ptr) (len := 1)
     ptr := s.ptr + 1
   }
 
