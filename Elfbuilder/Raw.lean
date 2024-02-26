@@ -6,6 +6,8 @@ import Elfbuilder.Writer
 
 -- Type for a 16-bit quantity.
 abbrev Elf64_Half := UInt16
+instance : Coe Nat Elf64_Half where coe n := n.toUInt16
+instance : Coe Elf64_Half Nat where coe n := n.toNat
 instance : OfNat Elf64_Half n where ofNat := n.toUInt16
 
 instance : ElfWriteable Elf64_Half where
@@ -15,6 +17,10 @@ instance : ElfWriteable Elf64_Half where
 abbrev Elf64_Word := UInt32
 abbrev Elf64_Sword := Int32
 
+instance : Coe Nat Elf64_Word where coe n := n.toUInt32
+instance : Coe Nat Elf64_Sword where coe n := n.toUInt32
+instance : Coe Elf64_Word Nat where coe n := n.toNat
+instance : Coe Elf64_Sword Nat where coe n := n.toNat
 instance : OfNat Elf64_Word n where ofNat := n.toUInt32
 instance : OfNat Elf64_Sword n where ofNat := n.toInt32
 
@@ -28,6 +34,10 @@ instance : ElfWriteable Elf64_Sword where
 abbrev Elf64_Xword := UInt64
 abbrev Elf64_Sxword := Int64
 
+instance : Coe Nat Elf64_Xword where coe n := n.toUInt64
+instance : Coe Nat Elf64_Sxword where coe n := n.toInt64
+instance : Coe Elf64_Xword Nat where coe n := n.toNat
+instance : Coe Elf64_Sxword Nat where coe n := n.toNat
 instance : OfNat Elf64_Xword n where ofNat := n.toUInt64
 instance : OfNat Elf64_Sxword n where ofNat := n.toInt64
 
@@ -39,6 +49,8 @@ instance : ElfWriteable Elf64_Sxword where
 -- Type of addresses.
 abbrev Elf64_Addr := UInt64
 
+instance : Coe Nat Elf64_Addr where coe n := n.toUInt64
+instance : Coe Elf64_Addr Nat where coe n := n.toNat
 instance : OfNat Elf64_Addr n where ofNat := n.toUInt64
 
 instance : ElfWriteable Elf64_Addr where
@@ -47,6 +59,8 @@ instance : ElfWriteable Elf64_Addr where
 -- Type of file offsets.
 abbrev Elf64_Off := UInt64
 
+instance : Coe Nat Elf64_Off where coe n := n.toUInt64
+instance : Coe Elf64_Off Nat where coe n := n.toNat
 instance : OfNat Elf64_Off n where ofNat := n.toUInt64
 
 instance : ElfWriteable Elf64_Off where
@@ -55,6 +69,8 @@ instance : ElfWriteable Elf64_Off where
 -- Type for section indices, which are 16-bit quantities.
 abbrev Elf64_Section := UInt16
 
+instance : Coe Nat Elf64_Section where coe n := n.toUInt16
+instance : Coe Elf64_Section Nat where coe n := n.toNat
 instance : OfNat Elf64_Section n where ofNat := n.toUInt16
 
 instance : ElfWriteable Elf64_Section where
@@ -62,6 +78,10 @@ instance : ElfWriteable Elf64_Section where
 
 -- Type for version symbol information.
 abbrev Elf64_Versym := Elf64_Half
+
+instance : Coe Nat Elf64_Versym where coe n := n.toUInt16
+instance : Coe Elf64_Versym Nat where coe n := n.toNat
+instance : OfNat Elf64_Versym n where ofNat := n.toUInt16
 
 instance : OfNat Elf64_Versym n where ofNat := n.toUInt16
 
@@ -362,20 +382,25 @@ def STV_INTERNAL : UInt8 := 1 -- Defined by processor supplements
 def STV_HIDDEN : UInt8 := 2 -- Not visible to other components
 def STV_PROTECTED : UInt8 := 3 -- Visible in other components but not preemptable
 
-
 def STN_UNDEF : Elf64_Half := 0 -- Undefined section
 
+class Offsetof (field : Name) where offsetof : Nat
+open Offsetof
+
+-- Section headers
 structure Elf64_Shdr where
-    sh_name : Elf64_Word -- Section name (index into the section header string table)
-    sh_type : Elf64_Word -- Section type (SHT_*)
-    sh_flags : Elf64_Xword -- Section flags (SHF_*)
-    sh_addr : Elf64_Addr -- Address where section is to be loaded
-    sh_offset : Elf64_Off -- File offset of section data in bytes
-    sh_size : Elf64_Xword -- Size of section data, in bytes
-    sh_link : Elf64_Word -- Section type-specific header table index link
-    sh_info : Elf64_Word -- Section type-specific extra information
-    sh_addralign : Elf64_Xword -- Address alignment boundary
-    sh_entsize : Elf64_Xword -- Size of entries, if section has table
+    sh_name : Elf64_Word := 0-- Section name (index into the section header string table)
+    sh_type : Elf64_Word := 0-- Section type (SHT_*)
+    sh_flags : Elf64_Xword := 0-- Section flags (SHF_*)
+    sh_addr : Elf64_Addr := 0-- Address where section is to be loaded
+    sh_offset : Elf64_Off := 0-- File offset of section data in bytes
+    sh_size : Elf64_Xword := 0-- Size of section data, in bytes
+    sh_link : Elf64_Word := 0-- Section type-specific header table index link
+    sh_info : Elf64_Word := 0-- Section type-specific extra information
+    sh_addralign : Elf64_Xword := 0-- Address alignment boundary
+    sh_entsize : Elf64_Xword := 0-- Size of entries, if section has table
+
+instance : Offsetof ``Elf64_Shdr.sh_name := ⟨0⟩
 
 instance : ElfWriteable Elf64_Shdr where
   write (shdr : Elf64_Shdr) := do

@@ -27,7 +27,7 @@ instance : Coe (VirtualAddr) (VirtualAddr?) where coe := .virtual
 
 -- X86 instruction set.
 inductive Instruction
-| Label (name : VirtualAddr) -- strictly speaking, not an instruction, but something that can occur in the text section nonetheless.
+| Label (name : String) (addr : VirtualAddr) -- strictly speaking, not an instruction, but something that can occur in the text section nonetheless.
 | MovAddr (r : Register) (a : VirtualAddr?)
 | Call (fn : VirtualAddr?)
 | Xor (r : Register) (s : Register)
@@ -39,17 +39,31 @@ structure Section where
   offset : Nat := 0
   size : Nat := 0
 
+def Section.toElf64_Shdr (s : Section) : Elf64_Shdr := {
+   sh_offset := s.offset,
+   sh_size := s.size
+ }
+
 structure TextSection extends Section where
 structure DataSection extends Section where
 structure RelaTextSection extends Section where
 structure SymtabSection extends Section where
+structure StrtabSection extends Section where
+
+structure SymbolTableEntry where
+    st_name : VirtualAddr -- Symbol name (index into string table)
+    st_info : UInt8 -- Symbol's type and binding attributes
+    st_shndx : Elf64_Half -- Which section (header tbl index) it's defined in
+    st_value : Elf64_Addr -- Value or address associated with the symbol
 
 structure ElfBuilderState where
   nAddrIxs : Nat := 0
   nSymtaxIxs : Nat := 0
   label2vaddr : HashMap String (VirtualAddr) := {}
   extern2vaddr : HashMap String (VirtualAddr) := {}
-  str2vaddr : HashMap String (VirtualAddr) := {}
+  datastr2vaddr : HashMap String (VirtualAddr) := {}
+  -- map strings in the string table to their corresponding symbol table entires
+  strtabstr2symtabentry : HashMap String SymbolTableEntry := {}
   instructions : Array Instruction := #[]
 
 abbrev ElfBuilderM := StateT ElfBuilderState IO
@@ -91,13 +105,27 @@ def createExternalSymbol (name : String) : ElfBuilderM (VirtualAddr) := do
     pure v
 
 /-- Create a string and return its symbolic address and an entry in the symbol table. -/
-def createString (str : String) : ElfBuilderM (VirtualAddr) := do
-  match (← get).str2vaddr.find? str with
+def createDataStr (str : String) : ElfBuilderM (VirtualAddr) := do
+  match (← get).datastr2vaddr.find? str with
   | some v => pure v
   | none => do
     let v ← _allocateVirtualAddrWithSymtab
-    modify fun s => { s with extern2vaddr := s.extern2vaddr.insert str v }
+    modify fun s => { s with datastr2vaddr := s.datastr2vaddr.insert str v }
     pure v
+
+/-- Create a string and return its symbolic address -/
+def createSymbolTableEntry (str : String)
+    (st_info : Uint8)
+    (st_shndx : Elf64_Half)
+    (st_value : Elf64_Addr) : ElfBuilderM (VirtualAddr) := do
+  match (← get).strtabstr2symtabentry .find? str with
+  | some v => pure v
+  | none => do
+    let v ← _allocateVirtualAddrWithSymtab
+    modify fun s => { s with symtabstr2vaddr := s.symtabstr2vaddr.insert str v }
+    pure v
+
+
 
 
 def emitInstruction (i : Instruction) : ElfBuilderM Unit := do
@@ -169,22 +197,30 @@ instance {kind : RealValueKind} : ElfWriteable kind.data where
     | .uint32 => ElfWriteable.write v
 
 
-def Elf64_Ehdr.default : Elf64_Ehdr  := {
-  e_ident := #[0x7f, 0x45, 0x4c, 0x46, ELFCLASS64, ELFDATA2LSB, EV_CURRENT.toUInt8]
-  e_type := ET_REL
-  e_machine := EM_X86_64
-  e_version := EV_CURRENT
-  e_ehsize := 64 -- sizeof (Elf64_Ehdr)
-  e_shentsize := 64 -- sizeof (Elf64_Shdr)
-  e_shnum := 6 --  [null, text, data, rela.text, symtab, string]
-  e_shstrndx := 3 -- rela index
-  e_phoff := 0
-  e_shoff := 0
-  e_entry := 0
-  e_flags := 0
-  e_phentsize := 0
-  e_phnum := 0
-}
+
+def textSectionHeaderIndex : Nat := 1 -- CAREFUL, synchronized with `emitSectionHeaders`
+def dataSectionHeaderIndex : Nat := 1 -- CAREFUL, synchronized with `emitSectionHeaders`
+def strtabSectionHeaderIndex : Nat := 3 -- CAREFUL, synchronized with `emitSectionHeaders`
+def symtabSectionHeaderIndex : Nat := 4 -- CAREFUL, synchronized with `emitSectionHeaders`
+
+def Elf64_Ehdr.default : Elf64_Ehdr  :=
+  {
+    e_ident := #[0x7f, 0x45, 0x4c, 0x46, ELFCLASS64, ELFDATA2LSB, EV_CURRENT.toUInt8, 0, 0, 0, 0, 0, 0, 0]
+    e_type := ET_REL
+    e_machine := EM_X86_64
+    e_version := EV_CURRENT
+    e_ehsize := 64 -- sizeof (Elf64_Ehdr)
+    e_shentsize := 64 -- sizeof (Elf64_Shdr)
+    e_shnum := 6 --  [null, text, data, strtab, symtab, rela.text]
+    e_shstrndx := strtabSectionHeaderIndex -- rela index
+    e_phoff := 0
+    e_shoff := 0
+    e_entry := 0
+    e_flags := 0
+    e_phentsize := 0
+    e_phnum := 0
+  }
+
 
 structure ElfTwoPassLinkerState extends ElfBuilderState where
   header : Elf64_Ehdr := Elf64_Ehdr.default
@@ -193,6 +229,7 @@ structure ElfTwoPassLinkerState extends ElfBuilderState where
   dataSection : DataSection := {}
   relaTextSection : RelaTextSection := {}
   symtabSection : SymtabSection := {}
+  strtabSection : StrtabSection := {}
   /- resolved virtual index to uint64. -/
   virtualAddrResponses : HashMap VirtualAddr RealValue := {}
   /- add a request to write a virtual value `vix` at index `nat`, as kind `kind` (32/64 bit). -/
@@ -251,8 +288,8 @@ def emitVirtualAddr? (v : VirtualAddr?)
 
 /-- Emit placeholders to calculate locations of labels. -/
 def emitInstruction : Instruction → ElfTwoPassLinkerM Unit
-| Instruction.Label name => do
-  resolveVirtualAddrAsCurrentAddr name
+| Instruction.Label name vaddr => do
+  resolveVirtualAddrAsCurrentAddr vaddr
   return ()
 | .MovAddr r a => do
     let code : Array UInt8 := #[0x48, 0xbf] ++ (List.replicate 8 0x00).toArray
@@ -277,7 +314,7 @@ def emitTextSection : ElfTwoPassLinkerM Unit := do
 /-- Write Sections[2]: Data -/
 def emitDataSection : ElfTwoPassLinkerM Unit := do
   let section_offset ← ElfWriterM.tell
-  let strs : ByteArray ← (← get).str2vaddr.foldM (init := ByteArray.empty) fun strs str vaddr => do
+  let strs : ByteArray ← (← get).datastr2vaddr.foldM (init := ByteArray.empty) fun strs str vaddr => do
     resolveVirtualAddrAsCurrentAddr vaddr
     let strs := strs ++ str.toUTF8.push 0x00.toUInt8
     return strs
@@ -296,7 +333,7 @@ def emitRelaTextSection : ElfTwoPassLinkerM Unit := do
 /-- Write Sections[4] : symtab -/
 def emitSymtabSection : ElfTwoPassLinkerM Unit := do
   let section_offset ← ElfWriterM.tell
-  (← get).str2vaddr.forM fun str vaddr => do
+  (← get).strtabstr2vaddr.forM fun str vaddr => do
     pure ()
   (← get).extern2vaddr.forM fun extern vaddr => do
     pure ()
@@ -307,6 +344,17 @@ def emitSymtabSection : ElfTwoPassLinkerM Unit := do
       size := section_size
     }
   }
+
+/-- Write Sections[5]: Strtab -/
+def emitStrtabSection : ElfTwoPassLinkerM Unit := do
+  let section_offset ← ElfWriterM.tell
+  let strs : ByteArray ← (← get).strtabstr2vaddr.foldM (init := ByteArray.empty) fun strs str vaddr => do
+    resolveVirtualAddrAsCurrentAddr vaddr
+    let strs := strs ++ str.toUTF8.push 0x00.toUInt8
+    return strs
+  ElfWriterM.write strs
+  let section_size := (← ElfWriterM.tell) - section_offset
+  modify fun s => { s with dataSection := { offset := section_offset, size := section_size } }
 
 /-- Once all data has been written, perform the second pass and fixup all requests. -/
 def fixupVirtualAddrRequests : ElfTwoPassLinkerM Unit := do
@@ -320,17 +368,69 @@ def fixupVirtualAddrRequests : ElfTwoPassLinkerM Unit := do
       | .uint32 => ElfWriterM.write value.toUInt32
   return ()
 
-def emitSectionHeaders : ElfTwoPassLinkerM Unit := sorry
+
+def emitSectionHeaders : ElfTwoPassLinkerM Unit := do
+  ElfWriterM.seek (← get).header.e_shoff.toNat
+  -- null[0]
+  let nullHeader : Elf64_Shdr := {}
+  ElfWriterM.write nullHeader
+  -- text[1]
+  let textHeader : Elf64_Shdr := {
+    (← get).textSection.toElf64_Shdr with
+    sh_type := SHT_PROGBITS,
+    sh_flags := SHF_ALLOC ||| SHF_EXECINSTR,
+    sh_addralign := 16
+  }
+  ElfWriterM.write textHeader
+  -- data[2]
+  let dataHeader : Elf64_Shdr := {
+    (← get).dataSection.toElf64_Shdr with
+    sh_type := SHT_PROGBITS,
+    sh_flags := SHF_ALLOC,
+    sh_addralign := 1
+  }
+  ElfWriterM.write dataHeader
+  -- strtab[3]
+  let strtabHeader : Elf64_Shdr := {
+    (← get).strtabSection.toElf64_Shdr with
+    sh_type := SHT_STRTAB,
+    sh_addralign := 1
+  }
+  ElfWriterM.write strtabHeader
+  -- symtab[4]
+  let symtabHeader : Elf64_Shdr := {
+    (← get).symtabSection.toElf64_Shdr with
+    sh_type := SHT_SYMTAB,
+    sh_link := strtabSectionHeaderIndex,
+    sh_info := (← get).extern2vaddr.size+1 -- TODO: double-check the semantics here.
+    sh_addralign := 8,
+    sh_entsize := 24 -- sizeof(Elf64_Sym)
+  }
+  ElfWriterM.write symtabHeader
+  -- rela[5]
+  let relaHeader : Elf64_Shdr := {
+    (← get).relaTextSection.toElf64_Shdr with
+    sh_type := SHT_RELA,
+    sh_flags := SHF_INFO_LINK,
+    sh_link := symtabSectionHeaderIndex,
+    sh_info := textSectionHeaderIndex,
+    sh_addralign := 8,
+    sh_entsize := 24 -- sizeof(Elf64_Rela)
+  }
+  ElfWriterM.write relaHeader
+
 
 namespace Internal
 def linkerScript : ElfTwoPassLinkerM Unit := do
   emitHeaderAndSectionHeadersPlaceholder
   emitTextSection
-  emitDataSection
+  emitDataSection -- strings and data used during runtime.
   emitRelaTextSection
   emitSymtabSection
+  emitStrtabSection -- strings used during link time.
   -- TODO: emitSectionHeaders
   emitSectionHeaders
+  fixupVirtualAddrRequests
 end Internal
 
 def runAndGetWriterM (state : ElfBuilderState) : ElfWriterM Unit := do
