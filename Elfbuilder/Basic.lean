@@ -256,14 +256,14 @@ def emitAddr : Expr .addr -> ElfBuilderM Unit
 
 def emitInstruction : Instruction → ElfBuilderM Unit
 | Instruction.Label name => do
-  let offset := (← get).textSection.tell
-  let ix ← emitStrtabString name
-  IO.println s!"ix for {name}={ix}"
+  let textSectionOffset := (← get).textSection.tell
+  IO.println s!"Label {name} at {textSectionOffset}"
+  let nameIx ← emitStrtabString name
   let symIx ← emitSymtab <|
-    { st_name := ix,
+    { st_name := nameIx,
       st_other := 0,
       st_shndx := textSectionHeaderIndex ,
-      st_value := offset,
+      st_value := textSectionOffset,
       st_size := 0 : Elf64_Sym}.setBindingAndType STB_GLOBAL STT_FUNC
 | Instruction.Xor r s => do
   let rex_prefix : UInt8 := 0x48  -- REX prefix for 64-bit operation

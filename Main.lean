@@ -4,7 +4,7 @@ open ElfBuilderM in
 def eg1 : ElfBuilderM Unit := do
   emitInstruction <| .Label "_start"
   emitInstruction <| .Xor .rdi .rdi
-  emitInstruction <| .MovImm32R (.uint32 0x60) .eax
+  emitInstruction <| .MovImm32R (.uint32 60) .eax
   emitInstruction <| .Syscall
   return ()
 
