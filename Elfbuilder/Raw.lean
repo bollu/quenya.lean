@@ -185,9 +185,9 @@ def Elf64_Rel.setType (rel : Elf64_Rel) (t : Elf64_Word) : Elf64_Rel :=
 -- https://github.com/llvm/llvm-project/blob/1e98d4883d78ac2c65b87e24694e8b2f1dc9f02d/llvm/include/llvm/BinaryFormat/ELF.h#L1407-L1422
 /-- Relocation entry with explicit addend. -/
 structure Elf64_Rela where
-    r_offset : Elf64_Addr -- Location (file byte offset, or program virtual addr) to apply the relocation action
-    r_info : Elf64_Xword -- Symbol table index and type of relocation to apply
-    r_addend : Elf64_Sxword -- Explicit addend to compute value to be stored in the relocatable field
+    r_offset : Elf64_Addr := 0-- Location (file byte offset, or program virtual addr) to apply the relocation action
+    r_info : Elf64_Xword := 0-- Symbol table index and type of relocation to apply
+    r_addend : Elf64_Sxword := 0 -- Explicit addend to compute value to be stored in the relocatable field
 
 instance : ElfWriteable Elf64_Rela where
   write (rela : Elf64_Rela) := do
@@ -203,6 +203,91 @@ def Elf64_Rela.setSymbol (rela : Elf64_Rela) (s : Elf64_Word) : Elf64_Rela :=
   rela.setSymbolAndType s rela.type
 def Elf64_Rela.setType (rela : Elf64_Rela) (t : Elf64_Word) : Elf64_Rela :=
   rela.setSymbolAndType rela.symbol t
+
+/-
+ELF_RELOC(R_X86_64_NONE,        0)
+ELF_RELOC(R_X86_64_64,          1)
+ELF_RELOC(R_X86_64_PC32,        2)
+ELF_RELOC(R_X86_64_GOT32,       3)
+ELF_RELOC(R_X86_64_PLT32,       4)
+ELF_RELOC(R_X86_64_COPY,        5)
+ELF_RELOC(R_X86_64_GLOB_DAT,    6)
+ELF_RELOC(R_X86_64_JUMP_SLOT,   7)
+ELF_RELOC(R_X86_64_RELATIVE,    8)
+ELF_RELOC(R_X86_64_GOTPCREL,    9)
+ELF_RELOC(R_X86_64_32,          10)
+ELF_RELOC(R_X86_64_32S,         11)
+ELF_RELOC(R_X86_64_16,          12)
+ELF_RELOC(R_X86_64_PC16,        13)
+ELF_RELOC(R_X86_64_8,           14)
+ELF_RELOC(R_X86_64_PC8,         15)
+ELF_RELOC(R_X86_64_DTPMOD64,    16)
+ELF_RELOC(R_X86_64_DTPOFF64,    17)
+ELF_RELOC(R_X86_64_TPOFF64,     18)
+ELF_RELOC(R_X86_64_TLSGD,       19)
+ELF_RELOC(R_X86_64_TLSLD,       20)
+ELF_RELOC(R_X86_64_DTPOFF32,    21)
+ELF_RELOC(R_X86_64_GOTTPOFF,    22)
+ELF_RELOC(R_X86_64_TPOFF32,     23)
+ELF_RELOC(R_X86_64_PC64,        24)
+ELF_RELOC(R_X86_64_GOTOFF64,    25)
+ELF_RELOC(R_X86_64_GOTPC32,     26)
+ELF_RELOC(R_X86_64_GOT64,       27)
+ELF_RELOC(R_X86_64_GOTPCREL64,  28)
+ELF_RELOC(R_X86_64_GOTPC64,     29)
+ELF_RELOC(R_X86_64_GOTPLT64,    30)
+ELF_RELOC(R_X86_64_PLTOFF64,    31)
+ELF_RELOC(R_X86_64_SIZE32,      32)
+ELF_RELOC(R_X86_64_SIZE64,      33)
+ELF_RELOC(R_X86_64_GOTPC32_TLSDESC,  34)
+ELF_RELOC(R_X86_64_TLSDESC_CALL,     35)
+ELF_RELOC(R_X86_64_TLSDESC,     36)
+ELF_RELOC(R_X86_64_IRELATIVE,   37)
+ELF_RELOC(R_X86_64_GOTPCRELX,   41)
+ELF_RELOC(R_X86_64_REX_GOTPCRELX,    42)
+-/
+-- ELF relocations for x86-64
+-- https://github.com/llvm/llvm-project/blob/cc53707a5c104eb7789829ecdb2e3ae2be1a42da/llvm/include/llvm/BinaryFormat/ELFRelocs/x86_64.def#L6
+def R_X86_64_NONE : Elf64_Word := 0 -- No reloc
+def R_X86_64_64 : Elf64_Word := 1 -- Direct 64 bit
+def R_X86_64_PC32 : Elf64_Word := 2 -- PC relative 32 bit signed
+def R_X86_64_GOT32 : Elf64_Word := 3 -- 32 bit GOT entry
+def R_X86_64_PLT32 : Elf64_Word := 4 -- 32 bit PLT address
+def R_X86_64_COPY : Elf64_Word := 5 -- Copy symbol at runtime
+def R_X86_64_GLOB_DAT : Elf64_Word := 6 -- Create GOT entry
+def R_X86_64_JUMP_SLOT : Elf64_Word := 7
+def R_X86_64_RELATIVE : Elf64_Word := 8
+def R_X86_64_GOTPCREL : Elf64_Word := 9
+def R_X86_64_32 : Elf64_Word := 10
+def R_X86_64_32S : Elf64_Word := 11
+def R_X86_64_16 : Elf64_Word := 12
+def R_X86_64_PC16 : Elf64_Word := 13
+def R_X86_64_8 : Elf64_Word := 14
+def R_X86_64_PC8 : Elf64_Word := 15
+def R_X86_64_DTPMOD64 : Elf64_Word := 16
+def R_X86_64_DTPOFF64 : Elf64_Word := 17
+def R_X86_64_TPOFF64 : Elf64_Word := 18
+def R_X86_64_TLSGD : Elf64_Word := 19
+def R_X86_64_TLSLD : Elf64_Word := 20
+def R_X86_64_DTPOFF32 : Elf64_Word := 21
+def R_X86_64_GOTTPOFF : Elf64_Word := 22
+def R_X86_64_TPOFF32 : Elf64_Word := 23
+def R_X86_64_PC64 : Elf64_Word := 24
+def R_X86_64_GOTOFF64 : Elf64_Word := 25
+def R_X86_64_GOTPC32 : Elf64_Word := 26
+def R_X86_64_GOT64 : Elf64_Word := 27
+def R_X86_64_GOTPCREL64 : Elf64_Word := 28
+def R_X86_64_GOTPC64 : Elf64_Word := 29
+def R_X86_64_GOTPLT64 : Elf64_Word := 30
+def R_X86_64_PLTOFF64 : Elf64_Word := 31
+def R_X86_64_SIZE32 : Elf64_Word := 32
+def R_X86_64_SIZE64 : Elf64_Word := 33
+def R_X86_64_GOTPC32_TLSDESC : Elf64_Word := 34
+def R_X86_64_TLSDESC_CALL : Elf64_Word := 35
+def R_X86_64_TLSDESC : Elf64_Word := 36
+def R_X86_64_IRELATIVE : Elf64_Word := 37
+def R_X86_64_GOTPCRELX : Elf64_Word := 41
+def R_X86_64_REX_GOTPCRELX : Elf64_Word := 42
 
 -- https://github.com/llvm/llvm-project/blob/1e98d4883d78ac2c65b87e24694e8b2f1dc9f02d/llvm/include/llvm/BinaryFormat/ELF.h#L1280-L1298
 structure Elf64_Sym where

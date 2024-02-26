@@ -1,4 +1,7 @@
-import «Elfbuilder»
+import Elfbuilder
+
+def eg1 : ElfBuilderM Unit := do
+  return ()
 
 def main : IO Unit :=
-  IO.println s!"Hello, {hello}!"
+  eg1.runAndWriteToFilePath "hello.exe"
