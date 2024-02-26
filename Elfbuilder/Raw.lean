@@ -4,6 +4,12 @@
 import Elfbuilder.Writer
 
 
+class Sizeof (field : Name) where sizeof : Nat
+open Sizeof
+
+class Offsetof (field : Name) where offsetof : Nat
+open Offsetof
+
 -- Type for a 16-bit quantity.
 abbrev Elf64_Half := UInt16
 instance : Coe Nat Elf64_Half where coe n := n.toUInt16
@@ -132,6 +138,9 @@ structure Elf64_Ehdr : Type :=
     e_shentsize : Elf64_Half -- Size of an entry in the section header table
     e_shnum : Elf64_Half -- Number of entries in the section header table
     e_shstrndx : Elf64_Half -- Section header table index of section name string table
+
+
+instance : Sizeof ``Elf64_Ehdr where sizeof := 64
 
 instance : ElfWriteable Elf64_Ehdr where
   write (hdr : Elf64_Ehdr) := do
@@ -384,9 +393,6 @@ def STV_PROTECTED : UInt8 := 3 -- Visible in other components but not preemptabl
 
 def STN_UNDEF : Elf64_Half := 0 -- Undefined section
 
-class Offsetof (field : Name) where offsetof : Nat
-open Offsetof
-
 -- Section headers
 structure Elf64_Shdr where
     sh_name : Elf64_Word := 0-- Section name (index into the section header string table)
@@ -401,6 +407,7 @@ structure Elf64_Shdr where
     sh_entsize : Elf64_Xword := 0-- Size of entries, if section has table
 
 instance : Offsetof ``Elf64_Shdr.sh_name := ⟨0⟩
+instance : Sizeof ``Elf64_Shdr where sizeof := 64
 
 instance : ElfWriteable Elf64_Shdr where
   write (shdr : Elf64_Shdr) := do

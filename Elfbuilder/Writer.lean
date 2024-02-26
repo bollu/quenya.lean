@@ -60,17 +60,23 @@ def writeUInt16 (x : UInt16) : ElfWriterM Unit := do
   writeUInt8 ((x >>> 8) &&& (0xff : UInt16)).toUInt8
 
 def writeUInt32 (x : UInt32) : ElfWriterM Unit := do
-  for i in [0:4] do
-    let i : UInt32 := i.toUInt32
-    writeUInt8 ((x >>> (i*8)) &&& (0xff : UInt32)).toUInt8
+  writeUInt8 (x &&& (0xff : UInt32)).toUInt8
+  writeUInt8 ((x >>> 8) &&& (0xff : UInt32)).toUInt8
+  writeUInt8 ((x >>> 16) &&& (0xff : UInt32)).toUInt8
+  writeUInt8 ((x >>> 24) &&& (0xff : UInt32)).toUInt8
 
 def writeInt32 (x : Int32) : ElfWriterM Unit :=
   writeUInt32 (x : UInt32)
 
 def writeUInt64 (x : UInt64) : ElfWriterM Unit := do
-  for i in [0:8] do
-    let i : UInt64 := i.toUInt64
-    writeUInt8 ((x >>> (i*8)) &&& (0xff : UInt64)).toUInt8
+  writeUInt8 (x &&& (0xff : UInt64)).toUInt8
+  writeUInt8 ((x >>> 8) &&& (0xff : UInt64)).toUInt8
+  writeUInt8 ((x >>> 16) &&& (0xff : UInt64)).toUInt8
+  writeUInt8 ((x >>> 24) &&& (0xff : UInt64)).toUInt8
+  writeUInt8 ((x >>> 32) &&& (0xff : UInt64)).toUInt8
+  writeUInt8 ((x >>> 40) &&& (0xff : UInt64)).toUInt8
+  writeUInt8 ((x >>> 48) &&& (0xff : UInt64)).toUInt8
+  writeUInt8 ((x >>> 56) &&& (0xff : UInt64)).toUInt8
 
 def writeInt64 (x : Int64) : ElfWriterM Unit := do
   writeUInt64 (x : UInt64)

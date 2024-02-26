@@ -5,22 +5,27 @@ open Lean IO FS
 inductive ExprKind
 | register
 | addr
-| syscall
+| imm32
 
 inductive Expr : (kind : ExprKind) → Type
-| rdi : Expr .register
 | rax : Expr .register
+| rcx : Expr .register
+| rdx : Expr .register
+| rbx : Expr .register
+| rsp : Expr .register
+| rbp : Expr .register
+| rsi : Expr .register
+| rdi : Expr .register
 | extern (name : String) : Expr .addr
 | data (data : ByteArray) : Expr .addr
-| syscallExit : Expr .syscall
+| uint32 (val : UInt32) : Expr .imm32
 
 -- X86 instruction set.
 inductive Instruction
 | Label (name : String) -- create a label like _start at this location.
-| MovAddr (r : Expr .register) (addr : Expr .addr)
-| Call (fn : Expr .addr)
 | Xor (r : Expr .register) (s : Expr .register)
-| Syscall (opcode : Expr .syscall)
+| MovImm32R (imm : Expr .imm32) (r : Expr .register)
+| Syscall
 
 -- Sections
 
@@ -123,16 +128,19 @@ def relaSectionHeaderIndex : Nat := 4 -- CAREFUL, synchronized with `emitSection
 
 def Elf64_Ehdr.default : Elf64_Ehdr  :=
   {
-    e_ident := #[0x7f, 0x45, 0x4c, 0x46, ELFCLASS64, ELFDATA2LSB, EV_CURRENT.toUInt8, 0, 0, 0, 0, 0, 0, 0]
+    e_ident := #[0x7f, 0x45, 0x4c, 0x46, -- 4
+      ELFCLASS64, ELFDATA2LSB, EV_CURRENT.toUInt8, -- 7
+      0, 0, 0, -- 10
+      0, 0, 0, 0, 0, 0] -- 16
     e_type := ET_REL
     e_machine := EM_X86_64
     e_version := EV_CURRENT
-    e_ehsize := 64 -- sizeof (Elf64_Ehdr)
-    e_shentsize := 64 -- sizeof (Elf64_Shdr)
+    e_ehsize := Sizeof.sizeof ``Elf64_Ehdr -- sizeof (Elf64_Ehdr)
+    e_shentsize := Sizeof.sizeof ``Elf64_Shdr -- sizeof (Elf64_Shdr)
     e_shnum := 6 --  [null, text, data, strtab, symtab, rela.text]
     e_shstrndx := strtabSectionHeaderIndex -- rela index
     e_phoff := 0
-    e_shoff := 0
+    e_shoff := Sizeof.sizeof ``Elf64_Shdr
     e_entry := 0
     e_flags := 0
     e_phentsize := 0
@@ -194,19 +202,33 @@ def emitTextByteArray (data : ByteArray) : ElfBuilderM Nat := do
   modify fun s => { s with textSection := s.textSection.append data }
   return out
 
+def emitTextUInt32 (i : UInt32) : ElfBuilderM Nat := do
+  let arr := #[]
+  let arr := arr.push <| ((i >>> 0) &&& (0xFF : UInt32)).toUInt8
+  let arr := arr.push <| ((i >>> 8) &&& (0xFF : UInt32)).toUInt8
+  let arr := arr.push <| ((i >>> 16) &&& (0xFF : UInt32)).toUInt8
+  let arr := arr.push <| ((i >>> 24) &&& (0xFF : UInt32)).toUInt8
+  emitTextByteArray <| ByteArray.mk arr
 
-def emitExpr : (kind : ExprKind) → Expr kind → ElfBuilderM Unit
-| .register, Expr.rdi => return ()
-| .register, Expr.rax => return ()
-| .addr, Expr.extern name => do
+def emitRegister : Expr .register → UInt8
+| Expr.rax => 0
+| Expr.rcx => 1
+| Expr.rdx => 2
+| Expr.rbx => 3
+| Expr.rsp => 4
+| Expr.rbp => 5
+| Expr.rsi => 6
+| Expr.rdi => 7
+
+
+def emitAddr : Expr .addr -> ElfBuilderM Unit
+| Expr.extern name => do
   let symIx ← emitSymtab { st_name := (← emitStrtabString name), st_info := 0, st_other := 0, st_shndx := SHN_UNDEF, st_value := 0, st_size := 0 }
   let relaIx ← emitRela <| { r_offset := (← get).textSection.tell, r_addend := 0 : Elf64_Rela }.setSymbolAndType symIx R_X86_64_PC32
-| .addr, Expr.data data => do
+| Expr.data data => do
   let dataIx ← emitDataByteArray data
   let symIx ← emitSymtab { st_name := 0, st_info := 0, st_other := 0, st_shndx := dataSectionHeaderIndex, st_value := dataIx, st_size := 0 }
   let relaIx ← emitRela <| { r_offset := (← get).textSection.tell, r_info := 0, r_addend := 0 : Elf64_Rela }.setSymbolAndType dataIx R_X86_64_64
-| .syscall, Expr.syscallExit => do
-    let _ ← emitTextByteArray <| ByteArray.mk #[0x0f, 0x05]
 
 
 def emitInstruction : Instruction → ElfBuilderM Unit
@@ -215,19 +237,19 @@ def emitInstruction : Instruction → ElfBuilderM Unit
   let ix ← emitStrtabString name
   let symIx ← emitSymtab <|
     { st_name := ix, st_other := 0, st_shndx := textSectionHeaderIndex , st_value := offset, st_size := 0 : Elf64_Sym}.setBindingAndType STB_GLOBAL STT_FUNC
-| Instruction.MovAddr r addr => do
-  let _ ← emitExpr ExprKind.addr addr
-  let _ ← emitExpr ExprKind.register r
-  let _ ← emitTextByteArray <| ByteArray.mk #[0x48, 0xc7, 0xc0, 0x00, 0x00, 0x00, 0x00]
-| Instruction.Call addr => do
-  let _ ← emitExpr ExprKind.addr addr
-  let _ ← emitTextByteArray <| ByteArray.mk #[0xe8, 0x00, 0x00, 0x00, 0x00]
 | Instruction.Xor r s => do
-  let _ ← emitExpr ExprKind.register r
-  let _ ← emitExpr ExprKind.register s
-  let _ ← emitTextByteArray <| ByteArray.mk #[0x48, 0x31, 0xc0]
-| Instruction.Syscall opcode => do
-  let _ ← emitExpr ExprKind.syscall opcode
+  let rex_prefix : UInt8 := 0x48  -- REX prefix for 64-bit operation
+  let opcode : UInt8 := 0x31  -- Opcode for XOR
+  let modrm : UInt8 := (0xC0 : UInt8) ||| (emitRegister r <<< 3) ||| emitRegister s  --  ModR/M byte
+  let _ ← emitTextByteArray <| ByteArray.mk #[rex_prefix, opcode, modrm]
+| Instruction.Syscall => do
+  let _ ← emitTextByteArray <| ByteArray.mk #[0x0f, 0x05]
+| Instruction.MovImm32R (.uint32 v) r => do
+  let rex_prefix : UInt8 := 0x48  -- REX prefix for 64-bit operation
+  let opcode_base : UInt8 := 0xB8  -- Base opcode for mov to RAX with immediate value. Others are B8+reg
+  let opcode := opcode_base + emitRegister r
+  let _ ← emitTextByteArray <| ByteArray.mk #[rex_prefix, opcode]
+  let _ ← emitTextUInt32 v
 
 -- 'E' in hex is: 0x45
 -- 'L' in hex is: 0x4c
@@ -235,8 +257,6 @@ def emitInstruction : Instruction → ElfBuilderM Unit
 def emitHeaderAndSectionHeadersPlaceholder  : ElfBuilderM Unit := do
   let header := (← get).header
   ElfWriterM.write header
-  let sh_offset ← ElfWriterM.tell
-  modify fun s => { s with header.e_shoff := sh_offset.toUInt64 }
   ElfWriterM.seek (header.e_ehsize + header.e_shentsize * header.e_shnum).toNat
 
 /-- Write Sections[1]: Text -/
