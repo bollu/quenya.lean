@@ -29,7 +29,8 @@ def seek (ix : Nat) : ElfWriterM Unit := do
     ptr := ix
     arr := Id.run do
       let mut arr := s.arr
-      for _ in [0:ix - s.arr.size] do arr ← arr.push 0
+      while arr.size < ix do
+        arr ← arr.push 0
       arr
   }
 
@@ -43,9 +44,8 @@ def withSeek (ix : Nat) (x : ElfWriterM α) : ElfWriterM α := do
 
 
 def writeByteArray (b : ByteArray) : ElfWriterM Unit := do
-  let ix ← tell
   modify fun s => { s with
-    arr := ByteArray.copySlice (src := b) (srcOff := 0) (dest := s.arr) (destOff := ix) (len := b.size)
+    arr := ByteArray.copySlice (src := b) (srcOff := 0) (dest := s.arr) (destOff := s.ptr) (len := b.size)
     ptr := s.ptr + b.size
   }
 

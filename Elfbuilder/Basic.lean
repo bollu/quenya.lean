@@ -8,6 +8,7 @@ inductive ExprKind
 | imm32
 
 inductive Expr : (kind : ExprKind) → Type
+| eax : Expr .register
 | rax : Expr .register
 | rcx : Expr .register
 | rdx : Expr .register
@@ -32,10 +33,12 @@ inductive Instruction
 structure Section where
   offset : Nat := 0
   size : Nat := 0
+  nameOffset : Nat := 0 -- offset in strtab for the name of the section
 
 def Section.toElf64_Shdr (s : Section) : Elf64_Shdr := {
+   sh_name := s.nameOffset,
    sh_offset := s.offset,
-   sh_size := s.size
+   sh_size := s.size,
  }
 
 structure TextSection extends Section where
@@ -69,12 +72,13 @@ def SymtabSection.append (s : SymtabSection) (sym : Elf64_Sym) : SymtabSection :
   { s with array := s.array.push sym }
 
 structure StrtabSection extends Section where
-  array : ByteArray := ByteArray.empty
+  -- ELF strings are 1-indexed, so we start with a junk string at index 1. "JUNK" is 4 bytes long, so we can use it as a placeholder for the first 4 bytes of the string table.
+  array : ByteArray :=  ("".toUTF8.push 0x00.toUInt8)
 
 -- +1 for each null terminator.
 def StrtabSection.tell (s : StrtabSection) : Nat := s.array.size
 def StrtabSection.append (s : StrtabSection) (str : String) : StrtabSection :=
-  { s with array := s.array ++ str.toUTF8.push 0x00.toUInt8 }
+  { s with array := s.array ++ (str.toUTF8.push 0x00.toUInt8) }
 
 inductive RealValueKind
 | uint64
@@ -138,7 +142,7 @@ def Elf64_Ehdr.default : Elf64_Ehdr  :=
     e_ehsize := Sizeof.sizeof ``Elf64_Ehdr -- sizeof (Elf64_Ehdr)
     e_shentsize := Sizeof.sizeof ``Elf64_Shdr -- sizeof (Elf64_Shdr)
     e_shnum := 6 --  [null, text, data, strtab, symtab, rela.text]
-    e_shstrndx := strtabSectionHeaderIndex -- rela index
+    e_shstrndx := strtabSectionHeaderIndex -- strtab section index
     e_phoff := 0
     e_shoff := Sizeof.sizeof ``Elf64_Shdr
     e_entry := 0
@@ -202,6 +206,18 @@ def emitTextByteArray (data : ByteArray) : ElfBuilderM Nat := do
   modify fun s => { s with textSection := s.textSection.append data }
   return out
 
+def emitTextUInt64 (i : UInt64) : ElfBuilderM Nat := do
+  let arr := #[]
+  let arr := arr.push <| ((i >>> 0) &&& (0xFF : UInt32)).toUInt8
+  let arr := arr.push <| ((i >>> 8) &&& (0xFF : UInt32)).toUInt8
+  let arr := arr.push <| ((i >>> 16) &&& (0xFF : UInt32)).toUInt8
+  let arr := arr.push <| ((i >>> 24) &&& (0xFF : UInt32)).toUInt8
+  let arr := arr.push <| ((i >>> 32) &&& (0xFF : UInt32)).toUInt8
+  let arr := arr.push <| ((i >>> 40) &&& (0xFF : UInt32)).toUInt8
+  let arr := arr.push <| ((i >>> 48) &&& (0xFF : UInt32)).toUInt8
+  let arr := arr.push <| ((i >>> 56) &&& (0xFF : UInt32)).toUInt8
+  emitTextByteArray <| ByteArray.mk arr
+
 def emitTextUInt32 (i : UInt32) : ElfBuilderM Nat := do
   let arr := #[]
   let arr := arr.push <| ((i >>> 0) &&& (0xFF : UInt32)).toUInt8
@@ -210,7 +226,14 @@ def emitTextUInt32 (i : UInt32) : ElfBuilderM Nat := do
   let arr := arr.push <| ((i >>> 24) &&& (0xFF : UInt32)).toUInt8
   emitTextByteArray <| ByteArray.mk arr
 
+def emitTextUInt16 (i : UInt16) : ElfBuilderM Nat := do
+  let arr := #[]
+  let arr := arr.push <| ((i >>> 0) &&& (0xFF : UInt32)).toUInt8
+  let arr := arr.push <| ((i >>> 8) &&& (0xFF : UInt32)).toUInt8
+  emitTextByteArray <| ByteArray.mk arr
+
 def emitRegister : Expr .register → UInt8
+| Expr.eax => 0
 | Expr.rax => 0
 | Expr.rcx => 1
 | Expr.rdx => 2
@@ -235,8 +258,13 @@ def emitInstruction : Instruction → ElfBuilderM Unit
 | Instruction.Label name => do
   let offset := (← get).textSection.tell
   let ix ← emitStrtabString name
+  IO.println s!"ix for {name}={ix}"
   let symIx ← emitSymtab <|
-    { st_name := ix, st_other := 0, st_shndx := textSectionHeaderIndex , st_value := offset, st_size := 0 : Elf64_Sym}.setBindingAndType STB_GLOBAL STT_FUNC
+    { st_name := ix,
+      st_other := 0,
+      st_shndx := textSectionHeaderIndex ,
+      st_value := offset,
+      st_size := 0 : Elf64_Sym}.setBindingAndType STB_GLOBAL STT_FUNC
 | Instruction.Xor r s => do
   let rex_prefix : UInt8 := 0x48  -- REX prefix for 64-bit operation
   let opcode : UInt8 := 0x31  -- Opcode for XOR
@@ -245,10 +273,9 @@ def emitInstruction : Instruction → ElfBuilderM Unit
 | Instruction.Syscall => do
   let _ ← emitTextByteArray <| ByteArray.mk #[0x0f, 0x05]
 | Instruction.MovImm32R (.uint32 v) r => do
-  let rex_prefix : UInt8 := 0x48  -- REX prefix for 64-bit operation
   let opcode_base : UInt8 := 0xB8  -- Base opcode for mov to RAX with immediate value. Others are B8+reg
   let opcode := opcode_base + emitRegister r
-  let _ ← emitTextByteArray <| ByteArray.mk #[rex_prefix, opcode]
+  let _ ← emitTextByteArray <| ByteArray.mk #[opcode]
   let _ ← emitTextUInt32 v
 
 -- 'E' in hex is: 0x45
@@ -257,6 +284,19 @@ def emitInstruction : Instruction → ElfBuilderM Unit
 def emitHeaderAndSectionHeadersPlaceholder  : ElfBuilderM Unit := do
   let header := (← get).header
   ElfWriterM.write header
+  -- create strtab entries for names of all sections.
+  -- text str
+  let textSectionNameStrtabOffset ← emitStrtabString  ".text"
+  IO.println s!"textSectionNameStrtabOffset={textSectionNameStrtabOffset}"
+  -- let _ ← emitSymtab { st_name := textSectionNameStrtabOffset, st_shndx := SHN_UNDEF, st_ }
+  modify fun s => { s with textSection := { s.textSection with nameOffset := textSectionNameStrtabOffset } }
+
+  let dataSectionNameStrtabOffset ← emitStrtabString  ".data"
+  modify fun s => { s with dataSection := { s.dataSection with nameOffset := dataSectionNameStrtabOffset } }
+
+  let symtabSectionNameStrtabOffset ← emitStrtabString  ".symtab"
+  modify fun s => { s with symtabSection := { s.symtabSection with nameOffset := symtabSectionNameStrtabOffset } }
+
   ElfWriterM.seek (header.e_ehsize + header.e_shentsize * header.e_shnum).toNat
 
 /-- Write Sections[1]: Text -/
@@ -264,14 +304,14 @@ def emitTextSection : ElfBuilderM Unit := do
   let section_offset ← ElfWriterM.tell
   ElfWriterM.write (← get).textSection.instructions
   let section_size := (← ElfWriterM.tell) - section_offset
-  modify fun s => { s with textSection := { offset := section_offset, size := section_size } }
+  modify fun s => { s with textSection := { s.textSection with offset := section_offset, size := section_size } }
 
 /-- Write Sections[2]: Data -/
 def emitDataSection : ElfBuilderM Unit := do
   let section_offset ← ElfWriterM.tell
   ElfWriterM.write (← get).dataSection.array
   let section_size := (← ElfWriterM.tell) - section_offset
-  modify fun s => { s with dataSection := { offset := section_offset, size := section_size } }
+  modify fun s => { s with dataSection := { s.dataSection with offset := section_offset, size := section_size } }
 
 /-- Write Sections[3] : Rela -/
 def emitRelaTextSection : ElfBuilderM Unit := do
@@ -279,7 +319,7 @@ def emitRelaTextSection : ElfBuilderM Unit := do
   for rela in (← get).relaTextSection.array do
     ElfWriterM.write rela
   let section_size := (← ElfWriterM.tell) - section_offset
-  modify fun s => { s with relaTextSection := { offset := section_offset, size := section_size } }
+  modify fun s => { s with relaTextSection := { s.relaTextSection with offset := section_offset, size := section_size } }
 
 /-- Write Sections[4] : symtab -/
 def emitSymtabSection : ElfBuilderM Unit := do
@@ -287,11 +327,7 @@ def emitSymtabSection : ElfBuilderM Unit := do
   for sym in (← get).symtabSection.array do
     ElfWriterM.write sym
   let section_size := (← ElfWriterM.tell) - section_offset
-  modify fun s => { s with
-    relaTextSection := {
-      offset := section_offset,
-      size := section_size
-    }
+  modify fun s => { s with symtabSection := { s.symtabSection with offset := section_offset, size := section_size }
   }
 
 /-- Write Sections[5]: Strtab -/
@@ -299,7 +335,7 @@ def emitStrtabSection : ElfBuilderM Unit := do
   let section_offset ← ElfWriterM.tell
   ElfWriterM.write (← get).strtabSection.array
   let section_size := (← ElfWriterM.tell) - section_offset
-  modify fun s => { s with dataSection := { offset := section_offset, size := section_size } }
+  modify fun s => { s with strtabSection := { s.strtabSection with offset := section_offset, size := section_size } }
 
 def emitSectionHeaders : ElfBuilderM Unit := do
   ElfWriterM.seek (← get).header.e_shoff.toNat
@@ -318,7 +354,7 @@ def emitSectionHeaders : ElfBuilderM Unit := do
   let dataHeader : Elf64_Shdr := {
     (← get).dataSection.toElf64_Shdr with
     sh_type := SHT_PROGBITS,
-    sh_flags := SHF_ALLOC,
+    sh_flags := SHF_ALLOC ||| SHF_WRITE,
     sh_addralign := 1
   }
   ElfWriterM.write dataHeader
@@ -330,6 +366,7 @@ def emitSectionHeaders : ElfBuilderM Unit := do
   }
   ElfWriterM.write strtabHeader
   -- symtab[4]
+  IO.println s!"symtab header name offset: {(← get).symtabSection.nameOffset}"
   let symtabHeader : Elf64_Shdr := {
     (← get).symtabSection.toElf64_Shdr with
     sh_type := SHT_SYMTAB,
@@ -360,6 +397,7 @@ def linkerScript : ElfBuilderM Unit := do
   emitRelaTextSection
   emitSymtabSection
   emitStrtabSection -- strings used during link time.
+  -- headers MUST be the last thing to be emitted.
   emitSectionHeaders
 end Internal
 

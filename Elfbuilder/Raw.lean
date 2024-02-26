@@ -24,7 +24,7 @@ abbrev Elf64_Word := UInt32
 abbrev Elf64_Sword := Int32
 
 instance : Coe Nat Elf64_Word where coe n := n.toUInt32
-instance : Coe Nat Elf64_Sword where coe n := n.toUInt32
+instance : Coe Nat Elf64_Sword where coe n := n.toInt32
 instance : Coe Elf64_Word Nat where coe n := n.toNat
 instance : Coe Elf64_Sword Nat where coe n := n.toNat
 instance : OfNat Elf64_Word n where ofNat := n.toUInt32
