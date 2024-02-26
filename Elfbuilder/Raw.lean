@@ -311,12 +311,12 @@ def R_X86_64_REX_GOTPCRELX : Elf64_Word := 42
 
 -- https://github.com/llvm/llvm-project/blob/1e98d4883d78ac2c65b87e24694e8b2f1dc9f02d/llvm/include/llvm/BinaryFormat/ELF.h#L1280-L1298
 structure Elf64_Sym where
-    st_name : Elf64_Word -- Symbol name (index into string table)
-    st_info : UInt8 -- Symbol's type and binding attributes
-    st_other : UInt8 -- Must be zero; reserved
-    st_shndx : Elf64_Half -- Which section (header tbl index) it's defined in
-    st_value : Elf64_Addr -- Value or address associated with the symbol
-    st_size : Elf64_Xword -- Size of the symbol
+    st_name : Elf64_Word := 0 -- Symbol name (index into string table)
+    st_info : UInt8 := 0 -- Symbol's type and binding attributes
+    st_other : UInt8 := 0 -- Must be zero; reserved
+    st_shndx : Elf64_Half := 0 -- Which section (header tbl index) it's defined in
+    st_value : Elf64_Addr := 0 -- Value or address associated with the symbol
+    st_size : Elf64_Xword := 0 -- Size of the symbol
 
 instance : ElfWriteable Elf64_Sym where
   write (sym : Elf64_Sym) := do

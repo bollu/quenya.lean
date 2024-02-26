@@ -128,4 +128,3 @@ def writeToFilePath (writer : ElfWriterM Unit) (path : System.FilePath) : IO Uni
   IO.FS.writeBinFile path (← writeToBuffer writer)
 
 end ElfWriterM
-
